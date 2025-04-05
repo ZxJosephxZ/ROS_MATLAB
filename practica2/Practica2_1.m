@@ -1,101 +1,86 @@
-%% INICIALIZACIÓN DE ROS (COMPLETAR ESPACIOS CON LAS DIRECCIONES IP)
+%% INICIALIZACIÓN DE ROS
 setenv('ROS_MASTER_URI','http://192.168.991.991:11311');  
 setenv('ROS_IP','192.168.199.199'); 
+rosinit()
 
-rosinit() % Inicialización de ROS en la IP correspondiente
+%% PARÁMETROS DEL CONTROLADOR
+D_deseado = 0.5;             % Distancia deseada a la pared
+Kp_dist = 1.0;               % Ganancia proporcional del error de distancia
+Kp_ang = 1.5;                % Ganancia para corrección angular
+Kd_curv = 1.0;               % Nueva: Ganancia derivativa para curvatura local
+V_lineal = 0.3;              % Velocidad lineal constante
 
-%% DECLARACIÓN DE VARIABLES NECESARIAS PARA EL CONTROL
-D_deseado = 0.5; % Distancia deseada a la pared (en metros)
-Kp_dist = 1.0; % Ganancia proporcional para el error de distancia
-Kp_ang = 1.5; % Ganancia proporcional para el error de orientación
-V_lineal = 0.3; % Velocidad lineal constante
+MAX_TIME = 1000;
+medidas = zeros(6, MAX_TIME);  % Matriz para almacenar datos
 
-MAX_TIME = 1000; % Máximo número de iteraciones
-medidas = zeros(5, MAX_TIME); % Matriz para almacenar datos
+%% SUBSCRIBERS Y PUBLISHERS
+odom = rossubscriber('/robot0/odom');
+sonar0 = rossubscriber('/robot0/sonar_0', rostype.sensor_msgs_Range);
+pub = rospublisher('/robot0/cmd_vel', 'geometry_msgs/Twist');
+msg_vel = rosmessage(pub);
 
-%% DECLARACIÓN DE SUBSCRIBERS Y PUBLISHERS
-odom = rossubscriber('/robot0/odom'); % Subscripción a la odometría
-sonar0 = rossubscriber('/robot0/sonar_0', rostype.sensor_msgs_Range); % Subscripción al sensor ultrasónico
-
-pub = rospublisher('/robot0/cmd_vel', 'geometry_msgs/Twist'); % Publicador de velocidad
-msg_vel = rosmessage(pub); % Mensaje de velocidad
-
-%% Definimos la periodicidad del bucle (10 Hz)
+%% BUCLE DE CONTROL
 r = robotics.Rate(10);
 waitfor(r);
+pause(3);
 
-pause(3); % Esperamos para recibir datos de odometría
+i = 0;
+dist_hist = [0 0];  % Historial de distancias para estimar curvatura
+pos_hist = [0 0];   % Posiciones anteriores para desplazamiento
 
-%% Bucle de control
-i = 0;  
-lastdist = 0;
-lastdistav = 0;
+while i < MAX_TIME
+    i = i + 1;
 
-while true
-    i = i + 1; 
-    
-    %% Obtener la posición y medidas del sonar
-    pos = odom.LatestMessage.Pose.Pose.Position;  
-    ori = odom.LatestMessage.Pose.Pose.Orientation;     
-    yaw = quat2eul([ori.W ori.X ori.Y ori.Z]); 
-    yaw = yaw(1); % Ángulo en radianes
-    
+    %% Datos de sensores
+    pos = odom.LatestMessage.Pose.Pose.Position;
+    ori = odom.LatestMessage.Pose.Pose.Orientation;
+    yaw = quat2eul([ori.W ori.X ori.Y ori.Z]);
+    yaw = yaw(1);
+
     msg_sonar0 = receive(sonar0);
-    dist = msg_sonar0.Range; % Medida del sensor
-    
-    % Limitamos la distancia máxima medida por el sensor
-    if dist > 5
-        dist = 5; 
-    end
-    
-    %% Calcular la distancia avanzada (delta entre iteraciones)
-    distav = sqrt((pos.X - lastdistav)^2 + (pos.Y - lastdist)^2);
-    
-    %% Calcular errores de control
-    Eori = atan2(dist - lastdist, distav); % Error de orientación
-    Edist = dist - D_deseado; % Error de distancia a la pared
-    
-    %% Almacenar datos para análisis
-    medidas(1, i) = dist; 
-    medidas(2, i) = lastdist; 
-    medidas(3, i) = distav; 
-    medidas(4, i) = Eori; 
-    medidas(5, i) = Edist; 
-    
-    %% Calcular consignas de velocidad
-    consigna_vel_linear = V_lineal; % Velocidad lineal fija
-    consigna_vel_ang = Kp_dist * Edist + Kp_ang * Eori; % Control proporcional
-    
-    %% Condición de parada (cuando errores son pequeños)
-    if (abs(Edist) < 0.01) && (abs(Eori) < 0.01)
-        break;
-    end
-    
-    %% Aplicar consignas de control
+    dist = min(msg_sonar0.Range, 5);  % Límite del sensor
+
+    %% Estimación de desplazamiento avanzado
+    dx = pos.X - pos_hist(1);
+    dy = pos.Y - pos_hist(2);
+    dist_avance = hypot(dx, dy);
+
+    %% Estimación de curvatura local
+    delta_dist = dist - dist_hist(1);
+    curvatura_local = atan2(delta_dist, dist_avance + 1e-6);  % Evita división por cero
+
+    %% Errores
+    Edist = dist - D_deseado;
+    Eori = curvatura_local;  % Error de orientación basado en cambio de distancias
+
+    %% Control adaptativo
+    consigna_vel_linear = V_lineal;
+    consigna_vel_ang = Kp_dist * Edist + Kp_ang * Eori + Kd_curv * (dist_hist(1) - dist_hist(2));
+
+    %% Aplicar velocidades
     msg_vel.Linear.X = consigna_vel_linear;
     msg_vel.Angular.Z = consigna_vel_ang;
-    
-    % Enviar comando de velocidad
     send(pub, msg_vel);
-    
-    %% Guardar valores actuales para la siguiente iteración
-    lastdist = dist;
-    lastdistav = distav;
-    
-    % Esperar al siguiente ciclo
-    waitfor(r);
-    
-    %% Salir si se alcanzó el número máximo de iteraciones
-    if i == MAX_TIME
+
+    %% Guardar datos
+    medidas(:, i) = [dist; dist_hist(1); dist_avance; Eori; Edist; consigna_vel_ang];
+
+    %% Actualización de historial
+    dist_hist = [dist dist_hist(1)];
+    pos_hist = [pos.X pos.Y];
+
+    %% Condición de parada si está estable
+    if abs(Edist) < 0.01 && abs(Eori) < 0.01 && dist_avance < 0.001
         break;
     end
+
+    waitfor(r);
 end
 
-%% DETENER EL ROBOT Y DESCONEXIÓN DE ROS
+%% DETENER ROBOT
 msg_vel.Linear.X = 0;
 msg_vel.Angular.Z = 0;
 send(pub, msg_vel);
 
-save('medidas.mat', 'medidas'); % Guardar datos de simulación
-
+save('medidas_curvas.mat', 'medidas');
 rosshutdown;

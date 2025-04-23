@@ -1,7 +1,7 @@
 rosshutdown;
-setenv('ROS_MASTER_URI','http://192.168.0.101:11311')
-setenv('ROS_IP','192.168.0.100')
-rosinit;
+    setenv('ROS_MASTER_URI','http://192.168.0.101:11311');  
+setenv('ROS_IP','192.168.56.1'); 
+rosinit()
 %girar(90,0.2);
 %avanzar(0.1,0.3);
 % Leer posición después del movimiento

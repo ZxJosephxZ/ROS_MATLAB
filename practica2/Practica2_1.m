@@ -1,7 +1,9 @@
 %% INICIALIZACIÓN DE ROS
-setenv('ROS_MASTER_URI','http://192.168.991.991:11311');  
-setenv('ROS_IP','192.168.199.199'); 
+rosshutdown;
+    setenv('ROS_MASTER_URI','http://192.168.0.101:11311');  
+setenv('ROS_IP','192.168.56.1'); 
 rosinit()
+
 
 %% PARÁMETROS DEL CONTROLADOR
 D_deseado = 0.5;             % Distancia deseada a la pared
@@ -38,7 +40,7 @@ while i < MAX_TIME
     yaw = yaw(1);
 
     msg_sonar0 = receive(sonar0);
-    dist = min(msg_sonar0.Range, 5);  % Límite del sensor
+    dist = min(msg_sonar0.Range_, 5);  % Límite del sensor
 
     %% Estimación de desplazamiento avanzado
     dx = pos.X - pos_hist(1);

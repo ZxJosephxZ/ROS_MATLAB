@@ -1,4 +1,4 @@
-
+rosshutdown;
 clear;
 clc;
 init_ros(); % Inicialización de ROS
@@ -12,7 +12,7 @@ umbral_distancia = 0.1;
 
 % Suscriptores y publicadores
 odom = rossubscriber('/robot0/odom');
-pub = rospublisher('/robot0/cmd_vel', 'geometry_msgs/Twist');
+pub = rospublisher('/robot0/cmd_vel');
 msg_vel = rosmessage(pub);
 
 % Pedir coordenadas de destino
@@ -50,9 +50,9 @@ while true
 end
 
 function init_ros()
-    setenv('ROS_MASTER_URI', 'http://192.168.990.901:11311');
-    setenv('ROS_IP', '192.168.990.900');
-    rosinit(); % Inicialización de ROS
+    setenv('ROS_MASTER_URI','http://192.168.0.101:11311');  
+setenv('ROS_IP','192.168.56.1'); 
+rosinit()
 end
 function [pos, yaw] = get_position_orientation(odom)
     pose = odom.LatestMessage.Pose.Pose;

@@ -86,33 +86,55 @@ for i = 1:100
     hold off;
     title(['Mapa con láser (iteración ' num2str(i) ')']);
     drawnow;
-    % === NAVEGACIÓN BÁSICA ===
-    frontAngles = [-0.2 0.2];  % ± aprox. 11 grados
-    idxs = find((angleMin + (0:length(ranges)-1)*angleInc) >= frontAngles(1) & ...
-                (angleMin + (0:length(ranges)-1)*angleInc) <= frontAngles(2));
-    frontRanges = ranges(idxs);
-    frontClear = all(frontRanges > safeDist);
+ % === NAVEGACIÓN MEJORADA CON EVASIÓN LATERAL ===
+robotRadius = 0.25;  % Radio de seguridad del robot
 
-    if frontClear
-        % Avanza
-        velMsg.Linear.X = forwardSpeed;
-        velMsg.Angular.Z = 0;
-    else
-        % Obstruido: girar hacia el lado más despejado
-        leftClear = mean(ranges(1:round(end/3))) > safeDist;
-        rightClear = mean(ranges(round(end*2/3):end)) > safeDist;
+angles = angleMin + (0:length(ranges)-1) * angleInc;
 
-        if leftClear && ~rightClear
+% Índices de zonas
+frontIdxs = find(angles >= -0.2 & angles <= 0.2);
+leftIdxs  = find(angles >= pi/4 & angles <= pi/2);
+rightIdxs = find(angles >= -pi/2 & angles <= -pi/4);
+
+% Rango en zonas
+frontRanges = ranges(frontIdxs);
+leftRanges  = ranges(leftIdxs);
+rightRanges = ranges(rightIdxs);
+
+% Seguridad por zonas
+frontClear = all(frontRanges > safeDist);
+leftTooClose = any(leftRanges < robotRadius);
+rightTooClose = any(rightRanges < robotRadius);
+
+% === Nueva lógica de evasión más robusta ===
+if frontClear && ~leftTooClose && ~rightTooClose
+    % Avanzar
+    velMsg.Linear.X = forwardSpeed;
+    velMsg.Angular.Z = 0;
+else
+    % Prioridad: evitar laterales primero, luego obstáculos al frente
+    if leftTooClose && ~rightTooClose
+        velMsg.Linear.X = 0;
+        velMsg.Angular.Z = -turnSpeed;  % gira a la derecha
+    elseif rightTooClose && ~leftTooClose
+        velMsg.Linear.X = 0;
+        velMsg.Angular.Z = turnSpeed;   % gira a la izquierda
+    elseif ~frontClear
+        % Si solo el frente está bloqueado, girar según zona más despejada
+        if mean(leftRanges) > mean(rightRanges)
             velMsg.Linear.X = 0;
             velMsg.Angular.Z = turnSpeed;
-        elseif ~leftClear && rightClear
-            velMsg.Linear.X = 0;
-            velMsg.Angular.Z = -turnSpeed;
         else
             velMsg.Linear.X = 0;
-            velMsg.Angular.Z = turnSpeed; % Gira por defecto
+            velMsg.Angular.Z = -turnSpeed;
         end
+    else
+        % Totalmente atrapado, gira por defecto
+        velMsg.Linear.X = 0;
+        velMsg.Angular.Z = turnSpeed;
     end
+end
+
 
     send(velPub, velMsg);
 end
